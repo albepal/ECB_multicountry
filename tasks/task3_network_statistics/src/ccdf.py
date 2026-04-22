@@ -483,11 +483,6 @@ def run_ccdf(panel_df, output_path, start, end, country):
                 os.path.join(output_path, f"{year}", "CCDF", f"{file_stub}.csv"),
                 index=False,
             )
-            df_year.to_latex(
-                os.path.join(output_path, f"{year}", "CCDF", f"{file_stub}.tex"),
-                index=False,
-                float_format="%.4f",
-            )
 
 # Master function
 def master_CCDF(full_df, panel_df, output_path, start, end, country):
