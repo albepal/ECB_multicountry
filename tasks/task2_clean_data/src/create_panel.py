@@ -38,96 +38,108 @@ def create_leontief_mat(G):
 
 def solve_linear_system(I_A, b, measure, year, x0=None):
 
-    U, info = spsl.lgmres(I_A, b, x0=x0)
+    U, info = spsl.lgmres(I_A, b, x0=x0, maxiter=2000)
     print(f'{measure}: Year {year}, info = {info}')
 
     return U
 
-def upstreamness(full_df, start, end):
-    
+def upstreamness(full_df, start, end, window=1):
+
     df_up = full_df.copy()
-    df_up['turnover_i'] = np.where( (df_up['network_sales_i'] == 
-                                        df_up['turnover_i']) , df_up['turnover_i'] + 1, df_up['turnover_i']  )
-
-    # add some final demand (1 euro) to the sales if network sales = turnover of i
-    df_up['turnover_j'] = np.where( (df_up['network_sales_j'] == 
-                                        df_up['turnover_j']) , df_up['turnover_j'] + 1, df_up['turnover_j']  )
-    
+    df_up['turnover_i'] = np.where(
+        df_up['network_sales_i'] == df_up['turnover_i'],
+        df_up['turnover_i'] + 1, df_up['turnover_i']
+    )
+    df_up['turnover_j'] = np.where(
+        df_up['network_sales_j'] == df_up['turnover_j'],
+        df_up['turnover_j'] + 1, df_up['turnover_j']
+    )
 
     results = []
-    
-    for year in range(start, end+1):
-        
-        df_year = df_up[df_up['year'] == year].copy()
-        
-        # calculate technical coefficients
+    col_name = 'upstreamness' if window == 1 else 'avg_upstreamness'
+
+    for year in range(start + window - 1, end + 1):
+
+        if window == 1:
+            df_year = df_up[df_up['year'] == year].copy()
+        else:
+            df_window = df_up[
+                (df_up['year'] >= year - window + 1) & (df_up['year'] <= year)
+            ].copy()
+            df_sales = df_window.groupby(['vat_i', 'vat_j'], as_index=False)['sales_ij'].sum()
+            df_turnover_unique = df_window[['year', 'vat_i', 'turnover_i']].drop_duplicates()
+            df_turnover = df_turnover_unique.groupby('vat_i', as_index=False)['turnover_i'].sum()
+            df_year = pd.merge(df_sales, df_turnover, on='vat_i', how='left')
+
         df_year['coef'] = calculate_technical_coeffs(df_year, 'turnover_i')
-
-        # define the graph
         G = define_graph(df_year)
-
-        # create Ghosh matrix as a sparse matrix
         I_A = create_leontief_mat(G)
-
-        # define the b vector
-        b = np.ones((len(G),1))
-
-        # Solve the linear system
-        U = solve_linear_system(I_A, b, 'Upstreamness', year, x0=b)
+        b = np.ones((len(G), 1))
         
-        # create the dataframe for single year
-        for vat, upstreamness in zip([node for node in G.nodes()], U):
+        label = 'Average upstreamness' if window > 1 else 'Upstreamness'
+        U = solve_linear_system(I_A, b, label, year, x0=b)
+
+        for vat, up_val in zip(G.nodes(), U):
             results.append({
                 'year': year,
                 'vat': vat,
-                'upstreamness': upstreamness
+                col_name: up_val,
             })
-            
-    upstreamness_df = pd.DataFrame(results)
-    
-    return upstreamness_df
 
-def downstreamness(full_df, start, end):
-    
+    return pd.DataFrame(results)
+
+
+def downstreamness(full_df, start, end, window=1):
+
     df_down = full_df.copy()
-    df_down['turnover_j'] = np.where(df_down['network_purch_j'] > df_down['turnover_j'],df_down['network_purch_j'],df_down['turnover_j'])
-    df_down['inputs_j'] = np.where(df_down['inputs_j'] >= df_down['turnover_j'], df_down['turnover_j'], df_down['inputs_j'] )
+    df_down['turnover_j'] = np.where(
+        df_down['turnover_j'].isna(),
+        df_down['network_purch_j'] + 1,
+        df_down['turnover_j']
+    )
+    df_down['turnover_j'] = np.where(
+        df_down['network_purch_j'] > df_down['turnover_j'],
+        df_down['network_purch_j'] + 1, df_down['turnover_j']
+    )
+    #df_down['inputs_j'] = np.where(
+    #    df_down['inputs_j'] >= df_down['turnover_j'],
+    #    df_down['turnover_j'], df_down['inputs_j']
+    #)
 
     results = []
-    
-    for year in range(start, end+1):
-        
-        df_year = df_down[df_down['year'] == year].copy()
-        
-        # remove firms with missing turnover
-        df_year = df_year[~df_year['turnover_j'].isna()].copy()
-        
-        # calculate technical coefficients
+    col_name = 'downstreamness' if window == 1 else 'avg_downstreamness'
+
+    for year in range(start + window - 1, end + 1):
+
+        if window == 1:
+            df_year = df_down[df_down['year'] == year].copy()
+        else:
+            df_window = df_down[
+                (df_down['year'] >= year - window + 1) & (df_down['year'] <= year)
+            ].copy()
+            df_sales = df_window.groupby(['vat_i', 'vat_j'], as_index=False)['sales_ij'].sum()
+            df_turnover_unique = df_window[['year', 'vat_j', 'turnover_j']].drop_duplicates()
+            df_turnover = df_turnover_unique.groupby('vat_j', as_index=False)['turnover_j'].sum()
+            df_year = pd.merge(df_sales, df_turnover, on='vat_j', how='left')
+
+        df_year = df_year[(df_year['turnover_j'].notna()) & (df_year['turnover_j'] != 0)].copy()
         df_year['coef'] = calculate_technical_coeffs(df_year, 'turnover_j')
-
-        # define the graph
         G = define_graph(df_year)
-
-        # create Ghosh matrix as a sparse matrix
         I_A = create_leontief_mat(G)
-
-        # define the b vector
-        b = np.ones((len(G),1))
-
-        # Solve the linear system
-        U = solve_linear_system(I_A.transpose(), b, 'Downstreamness', year, x0=b)
+        b = np.ones((len(G), 1))
         
-        # create the dataframe for single year
-        for vat, downstreamness in zip([node for node in G.nodes()], U):
+        label = 'Average downstreamness' if window > 1 else 'Downstreamness'
+        U = solve_linear_system(I_A.transpose(), b, label, year, x0=b)
+
+        for vat, down_val in zip(G.nodes(), U):
             results.append({
                 'year': year,
                 'vat': vat,
-                'downstreamness': downstreamness
+                col_name: down_val,
             })
-            
-    downstreamness_df = pd.DataFrame(results)
-    
-    return downstreamness_df
+
+    return pd.DataFrame(results)
+
 
 def domar_weights(full_df, start, end):
     
@@ -203,57 +215,65 @@ def domar_weights(full_df, start, end):
     domar_df = pd.DataFrame(results)
     return domar_df
 
-def centrality(
-    full_df,
-    start,
-    end,
-    alpha_const = False         
-):
-    results = []
+def centrality(full_df, start, end, alpha_const=False, window=1):
 
-    for year in range(start, end+1):
-        df_year = full_df[full_df['year'] == year].copy()
-        
+    results = []
+    col_name = 'centrality' if window == 1 else 'avg_centrality'
+
+    for year in range(start + window - 1, end + 1):
+
+        if window == 1:
+            df_year = full_df[full_df['year'] == year].copy()
+        else:
+            df_window = full_df[
+                (full_df['year'] >= year - window + 1) & (full_df['year'] <= year)
+            ].copy()
+            df_sales = df_window.groupby(['vat_i', 'vat_j'], as_index=False)['sales_ij'].sum()
+
+            # Aggregate turnover and inputs for both i and j sides
+            for side, vat_col in [('i', 'vat_i'), ('j', 'vat_j')]:
+                cols = [f'turnover_{side}', f'inputs_{side}', f'sales_to_fd_{side}']
+                df_unique = df_window[['year', vat_col] + cols].drop_duplicates()
+                df_agg_side = df_unique.groupby(vat_col, as_index=False)[cols].sum()
+                df_sales = pd.merge(df_sales, df_agg_side, on=vat_col, how='left')
+
+            df_year = df_sales
+
         if alpha_const:
             alpha = 0.2
-            df_year['coef'] = calculate_technical_coeffs(df_year, 'inputs_j') * (1-alpha)
-            #measure = 'Centrality (constant alpha)'
+            df_year['coef'] = calculate_technical_coeffs(df_year, 'inputs_j') * (1 - alpha)
         else:
             df_year['coef'] = calculate_technical_coeffs(df_year, 'turnover_j')
-            #measure = 'Centrality'
-            
-        # define the graph
+
         G = define_graph(df_year)
 
-        # create Leontief matrix as a sparse matrix
         I_A = create_leontief_mat(G)
 
-        # build per‐firm inputs and turnover
-        df_i = df_year.groupby('vat_i')[['inputs_i','turnover_i', 'sales_to_fd_i']] \
+        # build per-firm stats
+        df_i = df_year.groupby('vat_i')[['inputs_i', 'turnover_i', 'sales_to_fd_i']] \
               .first() \
-              .rename(columns={'inputs_i':'inputs','turnover_i':'turnover', 'sales_to_fd_i':'sales_to_fd'})
-        df_j = df_year.groupby('vat_j')[['inputs_j','turnover_j', 'sales_to_fd_j']] \
-                    .first() \
-                    .rename(columns={'inputs_j':'inputs','turnover_j':'turnover', 'sales_to_fd_j':'sales_to_fd'})
+              .rename(columns={'inputs_i': 'inputs', 'turnover_i': 'turnover', 'sales_to_fd_i': 'sales_to_fd'})
+        df_j = df_year.groupby('vat_j')[['inputs_j', 'turnover_j', 'sales_to_fd_j']] \
+              .first() \
+              .rename(columns={'inputs_j': 'inputs', 'turnover_j': 'turnover', 'sales_to_fd_j': 'sales_to_fd'})
 
-        # combine, so each vat appears once with whatever data it has
         firm_stats = pd.concat([df_i, df_j]).groupby(level=0).first()
         firm_stats = firm_stats[~firm_stats['sales_to_fd'].isna()]
-        
-        # push them into G
-        #  create dicts of values keyed by vat
+
+        gdp = firm_stats['sales_to_fd'].sum()
+
         salesfd_dict = firm_stats['sales_to_fd'].to_dict()
         nx.set_node_attributes(G, salesfd_dict, name='b')
-        
+
         node_order = sorted(G.nodes())
+
         if not alpha_const:
-            inputs_dict   = firm_stats['inputs'].to_dict()
+            inputs_dict = firm_stats['inputs'].to_dict()
             turnover_dict = firm_stats['turnover'].to_dict()
-            nx.set_node_attributes(G, inputs_dict,   name='inputs')
+            nx.set_node_attributes(G, inputs_dict, name='inputs')
             nx.set_node_attributes(G, turnover_dict, name='turnover')
-            # compute alpha = 1 - inputs/turnover
             alpha_dict = {
-                vat: (1 - inputs_dict.get(vat) / turnover_dict.get(vat))
+                vat: (1 - inputs_dict.get(vat, 0) / turnover_dict.get(vat, 1))
                 for vat in G.nodes()
             }
             nx.set_node_attributes(G, alpha_dict, name='alpha')
@@ -261,99 +281,22 @@ def centrality(
                 nx.get_node_attributes(G, 'alpha'),
                 index=node_order
             )
-        
-        # compute GDP
-        b_dict   = nx.get_node_attributes(G, 'b')
-        b_series = pd.Series([b_dict.get(node, 1) for node in node_order], index=node_order).fillna(0)
+
+        b_dict = nx.get_node_attributes(G, 'b')
+        b_series = pd.Series([b_dict.get(node, 0) for node in node_order], index=node_order).fillna(0)
         b = b_series.values.reshape(-1, 1)
-        gdp  = np.nansum(b)
-        
-        # Solve the linear system
-        r = solve_linear_system(I_A, b, 'Centrality', year)
+
+        label = 'Average centrality' if window > 1 else 'Centrality'
+        r = solve_linear_system(I_A, b, label, year)
         r_series = pd.Series(r.flatten(), index=node_order)
-        #r_dict = nx.get_node_attributes(G, 'turnover')
-        #r_series = pd.Series([r_dict.get(node, 1) for node in node_order], index=node_order)
-        
-        # compute centrality
-        C = alpha/gdp * r_series
-        
-        #if alpha_const:
-        #    print(f'Centrality (constant alpha): Year {year}')
-        #else:
-        #    print(f'Centrality: Year {year}')
-            
-        # create the dataframe for single year
-        for vat, centrality in zip([node for node in G.nodes()], C):
+
+        C = alpha / gdp * r_series
+
+        for vat, c_val in zip(node_order, C):
             results.append({
                 'year': year,
                 'vat': vat,
-                'centrality': centrality
-            })
-
-    return pd.DataFrame(results)
-
-def centrality_katz(full_df, start, end, alpha=0.2, katz_tol=1e-6, katz_max_iter=1000):
-    
-    results = []
-
-    for year in range(start, end + 1):
-        df_year = full_df[full_df['year'] == year].copy()
-
-        # --- 1. Build coefficients and graph ---
-        #df_year['coef'] = calculate_technical_coeffs(df_year, 'inputs_j')
-        df_year['coef'] =  df_year['sales_ij'] / df_year['inputs_j']
-        G = define_graph(df_year)  # must set edge weights = 'coef'
-
-        # --- 2. Build firm-level stats (inputs, turnover, sales_to_fd) ---
-        df_i = (
-            df_year.groupby('vat_i')[['inputs_i', 'turnover_i', 'sales_to_fd_i']]
-                  .first()
-                  .rename(columns={
-                      'inputs_i': 'inputs',
-                      'turnover_i': 'turnover',
-                      'sales_to_fd_i': 'sales_to_fd'
-                  })
-        )
-
-        df_j = (
-            df_year.groupby('vat_j')[['inputs_j', 'turnover_j', 'sales_to_fd_j']]
-                  .first()
-                  .rename(columns={
-                      'inputs_j': 'inputs',
-                      'turnover_j': 'turnover',
-                      'sales_to_fd_j': 'sales_to_fd'
-                  })
-        )
-
-        firm_stats = pd.concat([df_i, df_j]).groupby(level=0).first()
-        firm_stats = firm_stats[~firm_stats['sales_to_fd'].isna()]
-
-        # Only keep nodes that exist in G
-        node_order = sorted(G.nodes())
-        firm_stats = firm_stats.loc[firm_stats.index.intersection(node_order)]
-
-        # --- 3. Construct β_i = sales_to_fd_i ---
-        beta_series = firm_stats['sales_to_fd'].reindex(node_order).fillna(0.0)
-        beta_dict   = beta_series.to_dict()
-
-        # --- 4. Compute Katz/BONACICH centrality with node-specific β ---
-        katz_dict = nx.katz_centrality(
-            G,
-            alpha=alpha,
-            beta=beta_dict,
-            weight='weight',      
-            normalized=False,
-            max_iter=katz_max_iter,
-            tol=katz_tol
-        )
-
-        gdp  = np.nansum(beta_series)
-        # --- 5. Store results ---
-        for vat, c_val in katz_dict.items():
-            results.append({
-                'year': year,
-                'vat': vat,
-                'centrality': 0.2 * c_val/gdp
+                col_name: c_val,
             })
 
     return pd.DataFrame(results)
@@ -532,11 +475,13 @@ def create_panel(tmp_path, output_path):
     end = full_df['year'].max()
     
     upstreamness_df = upstreamness(full_df, start, end)
+    avg_upstreamness_df = upstreamness(full_df, start, end, window=3)
     
     downstreamness_df = downstreamness(full_df, start, end)
+    avg_downstreamness_df = downstreamness(full_df, start, end, window=3)
     
     centrality_df = centrality(full_df, start, end, alpha_const=True)
-    #centrality_df = centrality_katz(full_df, start, end, alpha=0.8)
+    avg_centrality_df = centrality(full_df, start, end, alpha_const=True, window=3)
     
     degrees_df = degrees(full_df, start, end)
     
@@ -547,7 +492,10 @@ def create_panel(tmp_path, output_path):
     wavg_df = wavg_mkt_share(full_df, start, end)
     
     panel_df = upstreamness_df.merge(downstreamness_df, on=['vat', 'year'], how='outer', validate='1:1')
+    panel_df = panel_df.merge(avg_upstreamness_df, on=['vat', 'year'], how='outer', validate='1:1')
+    panel_df = panel_df.merge(avg_downstreamness_df, on=['vat', 'year'], how='outer', validate='1:1')
     panel_df = panel_df.merge(centrality_df, on=['vat', 'year'], how='outer', validate='1:1')
+    panel_df = panel_df.merge(avg_centrality_df, on=['vat', 'year'], how='outer', validate='1:1')
     panel_df  = panel_df.merge(degrees_df, on=['vat', 'year'], how='outer', validate='1:1')
     panel_df = panel_df.merge(domar_df, on=['vat', 'year'], how='outer', validate='1:1')
     panel_df = panel_df.merge(net_df, on=['vat', 'year'], how='outer', validate='1:1')
