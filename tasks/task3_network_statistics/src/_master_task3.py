@@ -36,20 +36,19 @@ def master_task3():
 
     # 3. Copy output from previous task
     copy_output_from_task(abs_path, os.path.join('task2_clean_data','output'), ['full_data_cleaned.parquet', 'panel.parquet'])
-    copy_output_from_task(abs_path, os.path.join('raw_data'), ['gdp_data.csv', 'irfs_int_up_quarterly.csv',  'irfs_p_int_up_quarterly.csv',
-                                                                'ses_int_up_quarterly.csv',  'ses_p_int_up_quarterly.csv',  'vcov_bs_int_up_quarterly.csv',
-                                                                'vcov_p_bs_int_up_quarterly.csv'])
+    copy_output_from_task(abs_path, os.path.join('raw_data'), ['gdp_data.csv', 'irfs_int_avg_up_quarterly.csv',  'irfs_p_int_avg_up_quarterly.csv',
+                                                                'vcov_int_avg_up_quarterly.csv', 'vcov_p_int_avg_up_quarterly.csv'])
 
     # 4. Load the data
     full_df = pd.read_parquet(os.path.join(input_path, 'full_data_cleaned.parquet'))
     panel_df = pd.read_parquet(os.path.join(input_path, 'panel.parquet'))
     gdp_df = pd.read_csv(os.path.join(input_path, 'gdp_data.csv'))
-    
+
     # 5. Extract the years that need to be analyzed
     config = extract_config(abs_path)
     country = config['country']
     start, end = extract_start_end_years(abs_path)
-    
+
     # 6. Analysis
     # 6a. Correlations
     master_ext_mgn_correlations(panel_df, gdp_df, output_path, start, end, country)

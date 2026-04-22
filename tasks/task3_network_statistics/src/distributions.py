@@ -202,8 +202,11 @@ def master_distributions(panel_df, output_path, start, end, country):
         'avg_mkt_share',
         'domar',
         'upstreamness',
+        'avg_upstreamness',
         'downstreamness',
-        'centrality'
+        'avg_downstreamness',
+        'centrality',
+        'avg_centrality'
     ]
     
     label_map = {
