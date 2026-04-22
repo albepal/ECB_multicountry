@@ -4,8 +4,24 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import LogLocator
 import os    
 import powerlaw
+import statsmodels.api as sm
 from numba import njit, prange
 from common.utilities import format_sci, save_graph_data
+
+
+def gabaix_ibragimov(x):
+    x_sorted = np.sort(np.asarray(x))[::-1]  # descending
+    n = len(x_sorted)
+    if n < 2:
+        return np.nan, np.nan
+    ranks = np.arange(1, n + 1)
+    log_rank = np.log(ranks - 0.5)
+    log_x = np.log(x_sorted)
+    model = sm.OLS(log_rank, sm.add_constant(log_x)).fit()
+    alpha_hat = -model.params[1]
+    # GI standard error correction
+    se = model.bse[1] * np.sqrt(2)
+    return alpha_hat, se
 
 def top_share(panel_df, output_path, start, end, country):
 
@@ -356,6 +372,7 @@ def plot_powerlaw(
 def run_ccdf(panel_df, output_path, start, end, country):
     
     vars = ['turnover', 'network_sales', 'network_purch', 'inputs','domar', 'outdeg', 'indeg', 'centrality'] 
+    tail_estimator_rows = []
     
     label_map = {
         'turnover': 'Total sales',
@@ -401,6 +418,29 @@ def run_ccdf(panel_df, output_path, start, end, country):
                     verbose=False,
                 )
                 fit_inf["se_alpha"] = (fit_inf["alpha_pdf"] - 1.0) / np.sqrt(fit_inf["n_tail"])
+
+            gi_tau, gi_se = gabaix_ibragimov(fit_inf["x_tail"])
+
+            tail_estimator_rows.extend([
+                {
+                    "year": year,
+                    "variable": var_name,
+                    "estimator": "Hill",
+                    "exponent_ccdf": fit_inf["tau_ccdf"],
+                    "se": fit_inf["se_alpha"],
+                    "xmin": fit_inf["xmin"],
+                    "k": fit_inf["n_tail"],
+                },
+                {
+                    "year": year,
+                    "variable": var_name,
+                    "estimator": "Gabaix-Ibragimov",
+                    "exponent_ccdf": gi_tau,
+                    "se": gi_se,
+                    "xmin": fit_inf["xmin"],
+                    "k": fit_inf["n_tail"],
+                }
+            ])
                 
             plt.figure(figsize=(8,4))
             plot_powerlaw(var_np, fit_inf, kind='ccdf', fit_kwargs={'marker': '.', 'color': 'navy', 'alpha': 0.5})
@@ -431,6 +471,18 @@ def run_ccdf(panel_df, output_path, start, end, country):
             )
             plt.savefig(os.path.join(output_path, f'{year}', 'CCDF', f'ccdf_{year}_{var_name}_{country}.png'), dpi=300, bbox_inches='tight')
             plt.close()
+
+    if tail_estimator_rows:
+        tail_estimator_df = pd.DataFrame(tail_estimator_rows)
+        for year in range(start, end + 1):
+            df_year = tail_estimator_df[tail_estimator_df["year"] == year]
+            if df_year.empty:
+                continue
+            file_stub = f"tail_exponents_hill_gi_{country}"
+            df_year.to_csv(
+                os.path.join(output_path, f"{year}", "CCDF", f"{file_stub}.csv"),
+                index=False,
+            )
 
 # Master function
 def master_CCDF(full_df, panel_df, output_path, start, end, country):
