@@ -2,6 +2,7 @@ import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from common.utilities import save_graph_data
 
 def plot_irf_up_classes(irf_wide,
                         se_wide):
@@ -68,10 +69,10 @@ def add_tot_effect_and_se(
     vcov: pd.DataFrame,
     var,
     shock_var: str = "std_MP_median",
-    interaction: str = "upstreamness",
+    interaction: str = "avg_upstreamness",
     beta_col: str = "beta_sales",
     delta_col: str = "delta_sales",
-    z_col: str = "upstreamness",
+    z_col: str = "avg_upstreamness",
     h_col: str = "h",
 ):
 
@@ -174,6 +175,13 @@ def plot_irfs(panel_h, output_path, fig_name, var):
     plot_irf_up_classes(
         irf_wide=irf_wide,
         se_wide=se_wide
+    )
+    save_graph_data(
+        output_path=output_path,
+        file_name=f"{os.path.splitext(fig_name)[0]}_data",
+        data=class_irf[["h", "up_class", "tot_eff_class", "se_tot_eff_class"]],
+        year="all_years",
+        subfolder="monpol",
     )
 
     out_dir = os.path.join(output_path, 'all_years','monpol')
@@ -291,7 +299,7 @@ def avg_contribution_by_percentiles(panel_df, panel_h, var, output_path, country
 
     # Compute global cutoffs for upstreamness (over all firm-years)
     cutoffs = {
-        frac: panel_df["upstreamness"].quantile(1 - frac)
+        frac: panel_df["avg_upstreamness"].quantile(1 - frac)
         for frac in tail_fracs
     }
 
@@ -302,7 +310,7 @@ def avg_contribution_by_percentiles(panel_df, panel_h, var, output_path, country
         cutoff = cutoffs[frac]
 
         # restrict to firms in the top frac of upstreamness
-        mask = panel_h["upstreamness"] >= cutoff
+        mask = panel_h["avg_upstreamness"] >= cutoff
         panel_tail = panel_h[mask].copy()
 
         if panel_tail.empty:
@@ -555,24 +563,464 @@ def plot_percentile_contrib_by_horizon_delta(
     out_dir = os.path.join(output_path, 'all_years',"monpol")
     os.makedirs(out_dir, exist_ok=True)
     fig_path = os.path.join(out_dir, f"contrib_percentiles_{var}_{country}.png")
+    rows = []
+    for j, p in enumerate(tails):
+        rows.append(pd.DataFrame({
+            "h": horizons,
+            "percentile": p,
+            "mean_pct": mean_pct[:, j],
+            "ci_low_pct": lo_pct[:, j],
+            "ci_high_pct": hi_pct[:, j],
+        }))
+    save_graph_data(
+        output_path=output_path,
+        file_name=f"contrib_percentiles_{var}_{country}_data",
+        data=pd.concat(rows, ignore_index=True),
+        year="all_years",
+        subfolder="monpol",
+    )
     plt.savefig(fig_path, dpi=300, bbox_inches="tight")
     plt.close()
 
+def contrib_shares_byclass_horizon_mean_of_ratios(
+    panel_df: pd.DataFrame,
+    panel_h: pd.DataFrame,
+    var: str,
+    output_path: str,
+    country: str,
+    class_col: str = "up_class",
+    h_col: str = "h",
+    firm_col: str = "vat",
+    year_col: str = "year",
+    turnover_col: str = "turnover",
+    save: bool = True,
+    drop_zero_denominator: bool = True,
+):
+    
+    tot_col = f"tot_eff_{var}"
+    if tot_col not in panel_h.columns:
+        raise KeyError(f"panel_h must contain column '{tot_col}'")
+
+    # sales shares by year 
+    dfw = panel_df[[firm_col, year_col, turnover_col]].copy()
+    dfw = dfw.sort_values([firm_col, year_col])
+    dfw["total_turnover_year"] = dfw.groupby(year_col)[turnover_col].transform("sum")
+    dfw["sales_share"] = dfw[turnover_col] / dfw["total_turnover_year"]
+
+    # merge weights into panel_h
+    ph = panel_h.merge(
+        dfw[[firm_col, year_col, "sales_share"]],
+        on=[firm_col, year_col],
+        how="left",
+        validate="m:1",
+    ).copy()
+
+    ph = ph.dropna(subset=[year_col, h_col, class_col, "sales_share", tot_col])
+
+    # total aggregate effect by (year, h)
+    agg_year = (
+        ph.groupby([year_col, h_col])
+          .apply(lambda g: np.nansum(g["sales_share"] * g[tot_col]))
+          .rename("agg_eff")
+          .reset_index()
+    )
+
+    # class contribution by (year, h, class)
+    contrib_year = (
+        ph.groupby([year_col, h_col, class_col])
+          .apply(lambda g: np.nansum(g["sales_share"] * g[tot_col]))
+          .rename("contrib")
+          .reset_index()
+    )
+
+    share_long = contrib_year.merge(agg_year, on=[year_col, h_col], how="left")
+
+    if drop_zero_denominator:
+        share_long = share_long.dropna(subset=["agg_eff"])
+        share_long = share_long[share_long["agg_eff"] != 0]
+
+    share_long["share"] = share_long["contrib"] / share_long["agg_eff"]
+
+    # average shares across years
+    share_overall = (
+        share_long.groupby([h_col, class_col])["share"]
+                  .mean()
+                  .rename("share_mean_years")
+                  .reset_index()
+    )
+
+    share_wide = (
+        share_overall.pivot(index=h_col, columns=class_col, values="share_mean_years")
+                    .sort_index()
+                    .sort_index(axis=1)
+    )
+
+    # save outputs
+    if save:
+        out_dir = os.path.join(output_path, "all_years", "monpol")
+        os.makedirs(out_dir, exist_ok=True)
+
+        csv_path = os.path.join(out_dir, f"share_byclass_{var}_{country}.csv")
+        share_wide.to_csv(csv_path)
+
+    return share_wide, share_long
+
+
+def contrib_shares_bypercentile_horizon_mean_of_ratios(
+    panel_df: pd.DataFrame,
+    panel_h: pd.DataFrame,
+    var: str,
+    output_path: str,
+    country: str,
+    percentiles=(0.10, 0.01, 0.0001, 0.00001),  # top 10%, 1%, 0.01%, 0.001%
+    cutoff_mode: str = "yearly",  # "yearly" (recommended) or "global"
+    firm_col: str = "vat",
+    year_col: str = "year",
+    h_col: str = "h",
+    turnover_col: str = "turnover",
+    upstream_col: str = "upstreamness",
+    save: bool = True,
+    drop_zero_denominator: bool = True,
+):
+
+    tot_col = f"tot_eff_{var}"
+    if tot_col not in panel_h.columns:
+        raise KeyError(f"panel_h must contain column '{tot_col}'")
+
+    # sales shares by year
+    dfw = panel_df[[firm_col, year_col, turnover_col, upstream_col]].copy()
+    dfw = dfw.sort_values([firm_col, year_col])
+    dfw["total_turnover_year"] = dfw.groupby(year_col)[turnover_col].transform("sum")
+    dfw["sales_share"] = dfw[turnover_col] / dfw["total_turnover_year"]
+
+    # merge weights and upstreamness into panel_h 
+    ph = panel_h.merge(
+        dfw[[firm_col, year_col, "sales_share", upstream_col]],
+        on=[firm_col, year_col],
+        how="left",
+        validate="m:1",
+        suffixes=("", "_df"),
+    ).copy()
+
+    ph = ph.dropna(subset=[year_col, h_col, "sales_share", tot_col, upstream_col])
+
+    # total aggregate effect by (year, h)
+    agg_year = (
+        ph.groupby([year_col, h_col])
+          .apply(lambda g: np.nansum(g["sales_share"] * g[tot_col]))
+          .rename("agg_eff")
+          .reset_index()
+    )
+
+    global_cutoffs = None
+    if cutoff_mode == "global":
+        global_cutoffs = {p: dfw[upstream_col].quantile(1 - p) for p in percentiles}
+    elif cutoff_mode != "yearly":
+        raise ValueError("cutoff_mode must be 'yearly' or 'global'")
+
+    # compute shares for each percentile tail
+    all_long = []
+
+    for p in percentiles:
+        if cutoff_mode == "global":
+            cutoff_val = global_cutoffs[p]
+            mask = ph[upstream_col] >= cutoff_val
+            ph_tail = ph.loc[mask].copy()
+
+            contrib_tail = (
+                ph_tail.groupby([year_col, h_col])
+                      .apply(lambda g: np.nansum(g["sales_share"] * g[tot_col]))
+                      .rename("contrib")
+                      .reset_index()
+            )
+
+        else:  # yearly cutoffs
+            # compute cutoff within each year
+            cutoff_by_year = (
+                dfw.groupby(year_col)[upstream_col]
+                   .quantile(1 - p)
+                   .rename("cutoff")
+                   .reset_index()
+            )
+
+            ph2 = ph.merge(cutoff_by_year, on=year_col, how="left")
+            ph_tail = ph2[ph2[upstream_col] >= ph2["cutoff"]].copy()
+
+            contrib_tail = (
+                ph_tail.groupby([year_col, h_col])
+                      .apply(lambda g: np.nansum(g["sales_share"] * g[tot_col]))
+                      .rename("contrib")
+                      .reset_index()
+            )
+
+        tmp = contrib_tail.merge(agg_year, on=[year_col, h_col], how="left")
+        if drop_zero_denominator:
+            tmp = tmp.dropna(subset=["agg_eff"])
+            tmp = tmp[tmp["agg_eff"] != 0]
+
+        tmp["share"] = tmp["contrib"] / tmp["agg_eff"]
+        tmp["p"] = p
+        all_long.append(tmp[[year_col, h_col, "p", "share"]])
+
+    share_long = pd.concat(all_long, ignore_index=True)
+
+    # average across years
+    share_overall = (
+        share_long.groupby([h_col, "p"])["share"]
+                  .mean()
+                  .rename("share_mean_years")
+                  .reset_index()
+    )
+
+    # reshape to wide
+    share_wide = (
+        share_overall.pivot(index=h_col, columns="p", values="share_mean_years")
+                     .sort_index()
+                     .sort_index(axis=1)
+    )
+
+    # save
+    if save:
+        out_dir = os.path.join(output_path, "all_years", "monpol")
+        os.makedirs(out_dir, exist_ok=True)
+
+        csv_path = os.path.join(out_dir, f"share_bypercentile_{var}_{country}.csv")
+
+        share_wide.to_csv(csv_path)
+
+    return share_wide, share_long
+
+def plot_share_dots_by_class(
+    share_wide,
+    output_path=None,
+    filename=None,
+    xlabel="Quarter",
+    ylabel="Contribution to total effect (%)",
+    ncols=3,
+    figsize=(18, 6),
+    xtick_step=1,
+    share_in_percent=True,
+    ylims=None,
+):
+    
+    # horizons and classes
+    horizons = share_wide.index.to_numpy()
+    classes = list(share_wide.columns)
+    n_classes = len(classes)
+
+    # layout
+    nrows = int(np.ceil(n_classes / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=figsize, sharex=True)
+    axes = np.array(axes).reshape(-1)
+
+    # scale to percent if needed
+    plot_df = share_wide.copy()
+    if share_in_percent:
+        plot_df = plot_df * 100.0
+
+    # compute global y-limits if not provided
+    if ylims is None:
+        y_min = np.nanmin(plot_df.to_numpy())
+        y_max = np.nanmax(plot_df.to_numpy())
+        pad = 0.05 * (y_max - y_min) if (y_max > y_min) else 1.0
+        ylims = (y_min - pad, y_max + pad)
+
+    for j, cls in enumerate(classes):
+        ax = axes[j]
+        y = plot_df[cls].to_numpy()
+
+        mask = ~np.isnan(y)
+        x = horizons[mask]
+        y = y[mask]
+
+        ax.scatter(x, y, s=35)
+        ax.axhline(0, color="black", linewidth=0.8, linestyle="--")
+        ax.set_title(f"Upstreamness class {cls}")
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_xticks(np.arange(horizons.min(), horizons.max() + 1, xtick_step))
+        ax.grid(True, linestyle="--", alpha=0.6)
+        ax.set_ylim(*ylims)
+
+    # remove unused axes
+    for k in range(n_classes, len(axes)):
+        fig.delaxes(axes[k])
+
+    plt.tight_layout()
+
+    # save if requested
+    if output_path is not None:
+        if filename is None:
+            filename = "share_byclass_horizon.png"
+        import os
+        os.makedirs(output_path, exist_ok=True)
+        fig_path = os.path.join(output_path, filename)
+        save_graph_data(
+            output_path=os.path.dirname(os.path.dirname(output_path)),
+            file_name=f"{os.path.splitext(filename)[0]}_data",
+            data=plot_df.reset_index().rename(columns={"index": "h"}),
+            year="all_years",
+            subfolder="monpol",
+        )
+        plt.savefig(fig_path, dpi=300, bbox_inches="tight")
+        plt.close()
+    else:
+        plt.show()
+        
+def contrib_shares_bybins_horizon_mean_of_ratios(
+    panel_df: pd.DataFrame,
+    panel_h: pd.DataFrame,
+    var: str,
+    output_path: str,
+    country: str,
+    bin_edges=(0, 0.10, 0.25, 0.50, 0.75, 0.90, 1.0),
+    cutoff_mode: str = "yearly",   # "yearly" or "global"
+    firm_col: str = "vat",
+    year_col: str = "year",
+    h_col: str = "h",
+    turnover_col: str = "turnover",
+    upstream_col: str = "avg_upstreamness",
+    save: bool = True,
+    drop_zero_denominator: bool = True,
+):
+    """
+    Decompose the aggregate monetary policy response into contributions
+    from percentile bins of the upstreamness distribution.
+
+    Bins are assigned using percentile ranks rather than raw quantile cutoffs,
+    which avoids empty bins when quantile cutoffs coincide.
+    """
+
+    tot_col = f"tot_eff_{var}"
+    if tot_col not in panel_h.columns:
+        raise KeyError(f"panel_h must contain column '{tot_col}'")
+
+    # sales shares by year
+    dfw = panel_df[[firm_col, year_col, turnover_col, upstream_col]].copy()
+    dfw = dfw.sort_values([firm_col, year_col])
+    dfw["total_turnover_year"] = dfw.groupby(year_col)[turnover_col].transform("sum")
+    dfw["sales_share"] = dfw[turnover_col] / dfw["total_turnover_year"]
+
+    # merge weights and upstreamness into panel_h
+    ph = panel_h.merge(
+        dfw[[firm_col, year_col, "sales_share", upstream_col]],
+        on=[firm_col, year_col],
+        how="left",
+        validate="m:1",
+        suffixes=("", "_df"),
+    ).copy()
+
+    ph = ph.dropna(subset=[year_col, h_col, "sales_share", tot_col, upstream_col])
+
+    # precompute weighted effect
+    ph["_weighted_eff"] = ph["sales_share"] * ph[tot_col]
+
+    # total aggregate effect by (year, h)
+    agg_year = (
+        ph.groupby([year_col, h_col])["_weighted_eff"]
+          .sum()
+          .reset_index()
+          .rename(columns={"_weighted_eff": "agg_eff"})
+    )
+
+    bin_edges_sorted = sorted(bin_edges)
+    bin_labels = [
+        f"p{int(bin_edges_sorted[i]*100)}_p{int(bin_edges_sorted[i+1]*100)}"
+        for i in range(len(bin_edges_sorted) - 1)
+    ]
+
+    # assign percentile-rank bins
+    if cutoff_mode == "yearly":
+        # rank within each year
+        ph["_pct_rank"] = (
+            ph.groupby(year_col)[upstream_col]
+              .rank(method="average", pct=True)
+        )
+    elif cutoff_mode == "global":
+        ph["_pct_rank"] = ph[upstream_col].rank(method="average", pct=True)
+    else:
+        raise ValueError("cutoff_mode must be 'yearly' or 'global'")
+
+    # force exact 0 into first bin if needed
+    ph["_pct_rank"] = ph["_pct_rank"].clip(lower=1e-12, upper=1.0)
+
+    all_long = []
+
+    for i in range(len(bin_edges_sorted) - 1):
+        q_lo = bin_edges_sorted[i]
+        q_hi = bin_edges_sorted[i + 1]
+        bin_label = f"p{int(q_lo*100)}_p{int(q_hi*100)}"
+
+        if i < len(bin_edges_sorted) - 2:
+            mask = (ph["_pct_rank"] > q_lo) & (ph["_pct_rank"] <= q_hi)
+        else:
+            mask = (ph["_pct_rank"] > q_lo) & (ph["_pct_rank"] <= q_hi)
+
+        ph_bin = ph.loc[mask].copy()
+
+        contrib_bin = (
+            ph_bin.groupby([year_col, h_col])["_weighted_eff"]
+                  .sum()
+                  .reset_index()
+                  .rename(columns={"_weighted_eff": "contrib"})
+        )
+
+        tmp = contrib_bin.merge(agg_year, on=[year_col, h_col], how="left")
+
+        if drop_zero_denominator:
+            tmp = tmp.dropna(subset=["agg_eff"])
+            tmp = tmp[tmp["agg_eff"] != 0]
+
+        tmp["share"] = tmp["contrib"] / tmp["agg_eff"]
+        tmp["bin"] = bin_label
+        all_long.append(tmp[[year_col, h_col, "bin", "share"]])
+
+    share_long = pd.concat(all_long, ignore_index=True)
+
+    # average across years
+    share_overall = (
+        share_long.groupby([h_col, "bin"])["share"]
+                  .mean()
+                  .reset_index()
+                  .rename(columns={"share": "share_mean_years"})
+    )
+
+    share_wide = (
+        share_overall.pivot(index=h_col, columns="bin", values="share_mean_years")
+                     .sort_index()
+    )
+
+    # ensure all bins appear as columns, even if empty
+    for b in bin_labels:
+        if b not in share_wide.columns:
+            share_wide[b] = np.nan
+
+    share_wide = share_wide[bin_labels]
+
+    if save:
+        out_dir = os.path.join(output_path, "all_years", "monpol")
+        os.makedirs(out_dir, exist_ok=True)
+        csv_path = os.path.join(out_dir, f"share_bybins_{var}_{country}.csv")
+        share_wide.to_csv(csv_path)
+
+    return share_wide, share_long
+
 def master_monpol(panel_df, input_path, output_path, country):
     
-    irfs_sales = pd.read_csv(os.path.join(input_path, 'irfs_int_up_quarterly.csv')).rename(columns={'Unnamed: 0': 'h'})
-    irfs_prices = pd.read_csv(os.path.join(input_path, 'irfs_p_int_up_quarterly.csv')).rename(columns={'Unnamed: 0': 'h'})
-    vcov_sales = pd.read_csv(os.path.join(input_path, 'vcov_bs_int_up_quarterly.csv'), index_col=0)
-    vcov_prices = pd.read_csv(os.path.join(input_path, 'vcov_p_bs_int_up_quarterly.csv'), index_col=0)
+    irfs_sales = pd.read_csv(os.path.join(input_path, 'irfs_int_avg_up_quarterly.csv')).rename(columns={'Unnamed: 0': 'h'})
+    irfs_prices = pd.read_csv(os.path.join(input_path, 'irfs_p_int_avg_up_quarterly.csv')).rename(columns={'Unnamed: 0': 'h'})
+    vcov_sales = pd.read_csv(os.path.join(input_path, 'vcov_int_avg_up_quarterly.csv'), index_col=0)
+    vcov_prices = pd.read_csv(os.path.join(input_path, 'vcov_p_int_avg_up_quarterly.csv'), index_col=0)
     
     h = 12
     horizons = np.arange(h+1)
 
     # sort once
     panel_df = panel_df.sort_values(['vat', 'year']).reset_index(drop=True)
-    panel_df["upstreamness"] = (
-        panel_df.groupby("vat")["upstreamness"].shift(1)
-    )
+    #panel_df["avg_upstreamness"] = (
+    #    panel_df.groupby("vat")["avg_upstreamness"].shift(1)
+    #)
+    panel_df["avg_upstreamness"] = panel_df["avg_upstreamness"].clip(upper=20) # cap upstreamness at 20
 
     for var in ["sales", "prices"]:
         
@@ -592,10 +1040,10 @@ def master_monpol(panel_df, input_path, output_path, country):
 
         # merge beta and delta for this outcome
         panel_expanded = panel_expanded.merge(
-            irfs[['h','std_MP_median', 'std_MP_median_upstreamness']].rename(
+            irfs[['h','std_MP_median', 'std_MP_median_avg_upstreamness']].rename(
                 columns={
                     'std_MP_median':f'beta_{var}',
-                    'std_MP_median_upstreamness': f'delta_{var}'
+                    'std_MP_median_avg_upstreamness': f'delta_{var}'
                 }),
             on='h', how='left'
         )
@@ -604,14 +1052,59 @@ def master_monpol(panel_df, input_path, output_path, country):
         panel_h = add_tot_effect_and_se(panel_expanded, vcov, var, beta_col=f'beta_{var}', delta_col=f'delta_{var}')
         
         # upstreamness classes
-        panel_h = panel_h.dropna(subset=['upstreamness']).copy()
-        panel_h["up_class"] = np.ceil(panel_h["upstreamness"]).astype(int)
+        panel_h = panel_h.dropna(subset=['avg_upstreamness']).copy()
+        panel_h["up_class"] = np.ceil(panel_h["avg_upstreamness"]).astype(int)
         panel_h.loc[panel_h["up_class"] > 5, "up_class"] = 5
         
-        plot_irfs(panel_h, output_path, fig_name, var=var)
+        share_wide_pct, share_long_pct = contrib_shares_bybins_horizon_mean_of_ratios(
+            panel_df, 
+            panel_h, 
+            var , 
+            output_path, 
+            country, 
+            bin_edges=(0,0.01,0.05,0.25,0.5,0.75,0.95,0.99,1))
         
-        avg_contribution_byclass(panel_df, panel_h, var, output_path, country)
-        avg_contribution_by_percentiles(panel_df, panel_h, var, output_path, country)
+        #plot_irfs(panel_h, output_path, fig_name, var=var)
+        
+        share_wide, share_long = contrib_shares_byclass_horizon_mean_of_ratios(
+            panel_df=panel_df,
+            panel_h=panel_h,
+            var=var,
+            output_path=output_path,
+            country=country,
+        )
+        
+        #plot_share_dots_by_class(
+        #    share_wide=share_wide,
+        #    output_path=os.path.join(output_path, "all_years", "monpol"),
+        #    filename=f"share_byclass_{var}_{country}.png",
+        #    xlabel="Quarter",
+        #    ylabel="Contribution to total effect (%)",
+        #    xtick_step=1,
+        #    share_in_percent=True
+        #)
+        
+        #share_wide_pct, share_long_pct = contrib_shares_bypercentile_horizon_mean_of_ratios(
+        #    panel_df=panel_df,
+        #    panel_h=panel_h,
+        #    var=var,
+        #    output_path=output_path,
+        #    country=country,
+        #)
+
+        #plot_share_dots_by_class(
+        #    share_wide=share_wide_pct,
+        #    output_path=os.path.join(output_path, "all_years", "monpol"),
+        #    filename=f"share_bypercentile_{var}_{country}.png",
+        #    xlabel="Quarter",
+        #    ylabel="Contribution to total effect (%)",
+        #    xtick_step=1,
+        #    share_in_percent=True
+        #)
+        #avg_contribution_byclass(panel_df, panel_h, var, output_path, country)
+        #avg_contribution_by_percentiles(panel_df, panel_h, var, output_path, country)
+        
+        
         
 
 

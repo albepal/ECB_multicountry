@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import os 
-from common.utilities import set_ticks_log_scale, demean_variable_in_df, calculate_distribution_moments, kernel_density_plot, find_kernel_densities, recategorize_industry
+from common.utilities import set_ticks_log_scale, demean_variable_in_df, calculate_distribution_moments, kernel_density_plot, find_kernel_densities, recategorize_industry, save_graph_data
 
     
 def calculate_distributions_per_year(panel_df, output_path, start, end, vars_to_loop, label_map, country):
@@ -49,6 +49,7 @@ def calculate_distributions_per_year_by_ind(panel_df, output_path, start, end, v
             x_min = np.inf
             x_max = -np.inf
             df_year = panel_df[panel_df['year'] == year]
+            industry_plot_rows = []
 
             for industry in industries:
                 
@@ -68,10 +69,25 @@ def calculate_distributions_per_year_by_ind(panel_df, output_path, start, end, v
                 plt.plot(grid, kde_densities, label=f'{industry}')
                 x_min = min(min(grid), x_min)
                 x_max = max(max(grid), x_max)
+                industry_plot_rows.append(
+                    pd.DataFrame({
+                        "x": grid.flatten(),
+                        "density": kde_densities,
+                        "industry": industry,
+                    })
+                )
                 
             set_ticks_log_scale([x_min, x_max], step=2)
             plt.ylabel('Density')
             plt.legend()
+            plot_df = pd.concat(industry_plot_rows, ignore_index=True)
+            save_graph_data(
+                output_path=output_path,
+                file_name=f"{var}_bysec_demeaned_{demean}_{country}_data" if demean is not None else f"{var}_bysec_{country}_data",
+                data=plot_df,
+                year=year,
+                subfolder="kernel_densities",
+            )
             if demean is not None:
                 plt.xlabel(f'{xlabel}, demeaned')
                 plt.savefig(os.path.join(output_path,f'{year}', 'kernel_densities', f'{var}_bysec_demeaned_{demean}_{country}.png'), dpi=300, bbox_inches='tight')
@@ -164,6 +180,13 @@ def vars_correlation_summary(panel_df, output_path, start, end, vars_to_loop, la
                 nace_cat = ''
                 
             plt.savefig(os.path.join(output_path, f'{year}', 'correlations',f'correlation_heatmap_{country}{nace_cat}.png'), dpi=300)
+            save_graph_data(
+                output_path=output_path,
+                file_name=f"correlation_heatmap_{country}{nace_cat}_data",
+                data=corr_df.reset_index().rename(columns={"index": "variable"}),
+                year=year,
+                subfolder="correlations",
+            )
             plt.close()
 
 def master_distributions(panel_df, output_path, start, end, country):
@@ -202,8 +225,11 @@ def master_distributions(panel_df, output_path, start, end, country):
         'avg_mkt_share',
         'domar',
         'upstreamness',
+        'avg_upstreamness',
         'downstreamness',
-        'centrality'
+        'avg_downstreamness',
+        'centrality',
+        'avg_centrality'
     ]
     
     label_map = {

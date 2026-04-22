@@ -5,7 +5,7 @@ from matplotlib.ticker import LogLocator
 import os    
 import powerlaw
 from numba import njit, prange
-from common.utilities import format_sci
+from common.utilities import format_sci, save_graph_data
 
 def top_share(panel_df, output_path, start, end, country):
 
@@ -355,11 +355,13 @@ def plot_powerlaw(
 
 def run_ccdf(panel_df, output_path, start, end, country):
     
-    vars = ['turnover', 'network_sales', 'domar', 'outdeg', 'indeg', 'centrality'] 
+    vars = ['turnover', 'network_sales', 'network_purch', 'inputs','domar', 'outdeg', 'indeg', 'centrality'] 
     
     label_map = {
         'turnover': 'Total sales',
         'network_sales': 'Network sales',
+        'inputs': 'Total inputs',
+        'network_purch': 'Network inputs',
         'outdeg': 'Number of customers',
         'indeg': 'Number of suppliers',
         'domar': 'Domar weight',
@@ -390,6 +392,7 @@ def run_ccdf(panel_df, output_path, start, end, country):
                     "ks": model.D,
                     "n_tail": model.n_tail,
                     "x_tail": model.data,
+                    "se_alpha": model.power_law.sigma,
                 }
             else:
                 fit_inf = estimate_powerlaw_tail_numba(
@@ -397,14 +400,16 @@ def run_ccdf(panel_df, output_path, start, end, country):
                     exhaustive=True,  
                     verbose=False,
                 )
+                fit_inf["se_alpha"] = (fit_inf["alpha_pdf"] - 1.0) / np.sqrt(fit_inf["n_tail"])
+                
             plt.figure(figsize=(8,4))
             plot_powerlaw(var_np, fit_inf, kind='ccdf', fit_kwargs={'marker': '.', 'color': 'navy', 'alpha': 0.5})
                         
                         # Add text box with fit information
             textstr = '\n'.join((
-                            f'Tail exponent:  {fit_inf['tau_ccdf']:.2f}',
-                            f'$x_{{min}}$ = {format_sci(fit_inf['xmin'])}'
-                        ))
+                f'Tail exponent:  {fit_inf["tau_ccdf"]:.2f} ({fit_inf["se_alpha"]:.2f})',
+                f'$x_{{min}}$ = {format_sci(fit_inf["xmin"])}'
+            ))
             props = dict(boxstyle='round', facecolor='white', alpha=0.5)
             plt.gca().text(0.05, 0.2, textstr, transform=plt.gca().transAxes, fontsize=8,
                                     verticalalignment='top', bbox=props)
@@ -413,6 +418,17 @@ def run_ccdf(panel_df, output_path, start, end, country):
             plt.xlabel(xlabel)
             plt.ylabel(r'$P(X\geq x_{min})$')
             plt.grid(True)
+            x_sorted = np.sort(var_np[var_np > 0])
+            unique_x, counts = np.unique(x_sorted, return_counts=True)
+            surv = np.cumsum(counts[::-1])[::-1]
+            ccdf = surv / x_sorted.size
+            save_graph_data(
+                output_path=output_path,
+                file_name=f'ccdf_{year}_{var_name}_{country}_data',
+                data=pd.DataFrame({"x": unique_x, "ccdf": ccdf}),
+                year=year,
+                subfolder="CCDF",
+            )
             plt.savefig(os.path.join(output_path, f'{year}', 'CCDF', f'ccdf_{year}_{var_name}_{country}.png'), dpi=300, bbox_inches='tight')
             plt.close()
 
