@@ -421,26 +421,19 @@ def run_ccdf(panel_df, output_path, start, end, country):
 
             gi_tau, gi_se = gabaix_ibragimov(fit_inf["x_tail"])
 
-            tail_estimator_rows.extend([
+            tail_estimator_rows.append(
                 {
                     "year": year,
                     "variable": var_name,
-                    "estimator": "Hill",
-                    "exponent_ccdf": fit_inf["tau_ccdf"],
-                    "se": fit_inf["se_alpha"],
-                    "xmin": fit_inf["xmin"],
-                    "k": fit_inf["n_tail"],
-                },
-                {
-                    "year": year,
-                    "variable": var_name,
-                    "estimator": "Gabaix-Ibragimov",
-                    "exponent_ccdf": gi_tau,
-                    "se": gi_se,
-                    "xmin": fit_inf["xmin"],
-                    "k": fit_inf["n_tail"],
+                    "xmin_hill": fit_inf["xmin"],
+                    "k_hill": fit_inf["n_tail"],
+                    "hill_exponent_ccdf": fit_inf["tau_ccdf"],
+                    "hill_se": fit_inf["se_alpha"],
+                    "gi_exponent_ccdf": gi_tau,
+                    "gi_se": gi_se,
+                    "gi_tail_note": "GI uses Hill-selected tail (no GI-specific xmin/k)",
                 }
-            ])
+            )
                 
             plt.figure(figsize=(8,4))
             plot_powerlaw(var_np, fit_inf, kind='ccdf', fit_kwargs={'marker': '.', 'color': 'navy', 'alpha': 0.5})
