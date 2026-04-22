@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import os
 import matplotlib.pyplot as plt
+from common.utilities import save_graph_data
 
 def compute_moments(cv_df, col='cv_pct'):
     s = cv_df[col].dropna()
@@ -37,6 +38,13 @@ def summarize_cv(df, group_cols, min_n=2, eps=1e-12):
 def plot_cdf(values, output_path, year, coefficient, label, country,xlabel="Coefficient of Variation", logx=False):
     s = np.sort(values[~np.isnan(values)])   # drop NaNs & sort
     y = np.linspace(0, 1, len(s))
+    save_graph_data(
+        output_path=output_path,
+        file_name=f"CDF_CV_{coefficient}_shares_{label}_{country}_data",
+        data=pd.DataFrame({"value": s, "cdf": y}),
+        year=year,
+        subfolder="coefficients_of_variation",
+    )
 
     plt.figure(figsize=(10,6))
     plt.plot(s, y, lw=2)

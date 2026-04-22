@@ -3,6 +3,7 @@ import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
 import os 
+from common.utilities import save_graph_data
 
 # 1. Full panel stats
 def count_firms(G):
@@ -149,6 +150,15 @@ def plots_descriptive(B2B_df, output_path, start, end):
     ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left")
 
     plt.tight_layout()
+    save_graph_data(
+        output_path=output_path,
+        file_name="nfirms_links_plot_data",
+        data=pd.DataFrame({
+            "year": list(x),
+            "n_links_mln": nlinks_array,
+            "n_firms_thousands": nfirms_array,
+        }),
+    )
     plt.savefig(os.path.join(output_path, 'nfirms_links_plot.png'), dpi=300)
     plt.close()
     
@@ -166,6 +176,14 @@ def plots_descriptive(B2B_df, output_path, start, end):
     #plt.legend()
 
     plt.tight_layout()
+    save_graph_data(
+        output_path=output_path,
+        file_name="average_deg_plot_data",
+        data=pd.DataFrame({
+            "year": list(x),
+            "average_degree": average_deg_array,
+        }),
+    )
     plt.savefig(os.path.join(output_path, 'average_deg_plot.png'), dpi=300)
     plt.close()
     

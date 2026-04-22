@@ -275,6 +275,24 @@ def aggregate_and_bin(df_year, x, y):
 
     return binned_data
 
+def save_graph_data(output_path, file_name, data, year=None, subfolder=None):
+    base_dir = os.path.join(output_path, "data_graphs")
+    if year is not None:
+        base_dir = os.path.join(base_dir, str(year))
+    if subfolder is not None:
+        base_dir = os.path.join(base_dir, subfolder)
+    os.makedirs(base_dir, exist_ok=True)
+
+    if isinstance(data, pd.DataFrame):
+        df_out = data.copy()
+    elif isinstance(data, dict):
+        df_out = pd.DataFrame(data)
+    else:
+        df_out = pd.DataFrame(data)
+
+    csv_name = file_name if file_name.endswith(".csv") else f"{file_name}.csv"
+    df_out.to_csv(os.path.join(base_dir, csv_name), index=False)
+
 def find_kernel_densities(vec, bdwidth=1):
     # transpose the vector
     vec = vec.reshape(-1,1)
@@ -291,6 +309,17 @@ def kernel_density_plot(array, xlabel: str, ylabel: str, name_plot: str, output_
 
     grid, kde_densities = find_kernel_densities(array)
     plt.plot(grid, kde_densities)
+    plot_data = pd.DataFrame({
+        "x": grid.flatten(),
+        "density": kde_densities
+    })
+    save_graph_data(
+        output_path=output_path,
+        file_name=f"{os.path.splitext(name_plot)[0]}_data",
+        data=plot_data,
+        year=year,
+        subfolder="kernel_densities",
+    )
     set_ticks_log_scale(grid, step=2)
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
