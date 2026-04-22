@@ -3,7 +3,7 @@ import pyfixest as pf
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from common.utilities import demean_variable_in_df
+from common.utilities import demean_variable_in_df, save_graph_data
 
 def extract_two_way_fe(df, yvar, fe_vars, res,
                              resid_col="resid",
@@ -356,6 +356,13 @@ def var_decomposition(reg_panel, year, output_path, country, by_sector=False):
             f.write(latex)
             
         fig, ax = plot_firm_size_decomposition(reg_panel, n_bins=20)
+        save_graph_data(
+            output_path=output_path,
+            file_name=f'firm_size_decomp_{country}_data',
+            data=build_firm_size_decomposition_data(reg_panel, n_bins=20),
+            year=year,
+            subfolder='var_decomp',
+        )
         plt.savefig(os.path.join(output_path, f'{year}', 'var_decomp',f'firm_size_decomp_{country}.png'), dpi=300)
         plt.close()
             
@@ -423,24 +430,14 @@ def plot_firm_size_decomposition(reg_panel, n_bins=20):
         duplicates="drop"
     )
 
-    # 2. Compute bin means of ln variables
-    cols = [
-        "ln_turnover_dem",
-        "ln_psi_i_dem",
-        "ln_outdeg_dem",
-        "ln_avg_theta_i_dem",
-        "ln_Omega_i_dem",
-        "ln_beta_i_dem",
-    ]
-    gb = reg_panel.groupby("bin")[cols].mean()
+    gb = build_firm_size_decomposition_data(reg_panel, n_bins=n_bins, return_levels=True)
 
-    # 3. Convert to levels for plotting (as in the figure)
-    S = np.exp(gb["ln_turnover_dem"])
-    psi = np.exp(gb["ln_psi_i_dem"])
-    n_c = np.exp(gb["ln_outdeg_dem"])
-    theta_bar = np.exp(gb["ln_avg_theta_i_dem"])
-    Omega = np.exp(gb["ln_Omega_i_dem"])
-    beta = np.exp(gb["ln_beta_i_dem"])
+    S = gb["S"]
+    psi = gb["psi_i"]
+    n_c = gb["outdeg"]
+    theta_bar = gb["avg_theta_i"]
+    Omega = gb["Omega_i"]
+    beta = gb["beta_i"]
 
     # 4. Plot: log–log binned scatter
     fig, ax = plt.subplots(figsize=(10,6))
@@ -460,6 +457,35 @@ def plot_firm_size_decomposition(reg_panel, n_bins=20):
 
     fig.tight_layout()
     return fig, ax   
+
+def build_firm_size_decomposition_data(reg_panel, n_bins=20, return_levels=False):
+    panel = reg_panel.copy()
+    panel["bin"] = pd.qcut(
+        panel["ln_turnover_dem"],
+        q=n_bins,
+        labels=False,
+        duplicates="drop"
+    )
+    cols = [
+        "ln_turnover_dem",
+        "ln_psi_i_dem",
+        "ln_outdeg_dem",
+        "ln_avg_theta_i_dem",
+        "ln_Omega_i_dem",
+        "ln_beta_i_dem",
+    ]
+    gb = panel.groupby("bin")[cols].mean()
+    levels = pd.DataFrame({
+        "S": np.exp(gb["ln_turnover_dem"]),
+        "psi_i": np.exp(gb["ln_psi_i_dem"]),
+        "outdeg": np.exp(gb["ln_outdeg_dem"]),
+        "avg_theta_i": np.exp(gb["ln_avg_theta_i_dem"]),
+        "Omega_i": np.exp(gb["ln_Omega_i_dem"]),
+        "beta_i": np.exp(gb["ln_beta_i_dem"]),
+    }).reset_index()
+    if return_levels:
+        return levels.set_index("bin")
+    return levels
     
 #####
 def master_var_decomp(full_df, panel_df, output_path, start, end, country):

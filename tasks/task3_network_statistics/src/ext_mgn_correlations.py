@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import statsmodels.api as sm
 import os 
 import re
-from common.utilities import demean_variable_in_df, set_ticks_log_scale, aggregate_and_bin
+from common.utilities import demean_variable_in_df, set_ticks_log_scale, aggregate_and_bin, save_graph_data
 
 def plot_binned_data(binned_data, res, x, y):
     
@@ -48,6 +48,15 @@ def corr_outdeg_indeg(full_df, output_path, start, end, country):
         
         # Now plot the binned data
         plot_binned_data(binned_data, res, 'log_outdeg_dem', 'log_indeg_dem')
+        save_graph_data(
+            output_path=output_path,
+            file_name=f'indeg_outdeg_{country}_data',
+            data=binned_data[["log_outdeg_dem", "log_indeg_dem"]].rename(
+                columns={"log_outdeg_dem": "x", "log_indeg_dem": "y"}
+            ),
+            year=year,
+            subfolder=os.path.join("correlations", "binned_scatters"),
+        )
         plt.xlabel('Number of customers, demeaned')
         plt.ylabel('Number of suppliers, demeaned')
         fig_path = os.path.join(
@@ -153,6 +162,15 @@ def binned_plots_demeaned_vars(panel_df, output_path, country, start, end):
                 # ---- binned scatter plot ----
                 binned_data = aggregate_and_bin(df_use, 'ln_outdeg_dem', f'ln_{yvar}_dem')
                 plot_binned_data(binned_data, res, 'ln_outdeg_dem',  f'ln_{yvar}_dem')
+                save_graph_data(
+                    output_path=output_path,
+                    file_name=f"binned_ln_{yvar}_outdeg_dem{nace}_{country}_data",
+                    data=binned_data[["ln_outdeg_dem", f"ln_{yvar}_dem"]].rename(
+                        columns={"ln_outdeg_dem": "x", f"ln_{yvar}_dem": "y"}
+                    ),
+                    year=year,
+                    subfolder=os.path.join("correlations", "binned_scatters"),
+                )
 
                 ylabel = label_map.get( f'ln_{yvar}_dem',  f'ln_{yvar}_dem')
                 xlabel = label_map.get('ln_outdeg_dem', 'ln_outdeg_dem')
@@ -293,6 +311,12 @@ def gdp_reg(panel_df, gdp_df, gdp_pc_df, output_path, country):
             # save
             fname = f"{prefix}_{y_col}_{country}.png"
             fig.savefig(os.path.join(output_path,'all_years',fname), dpi=300, bbox_inches='tight')
+            save_graph_data(
+                output_path=output_path,
+                file_name=f"{os.path.splitext(fname)[0]}_data",
+                data=pd.DataFrame({"x": x.values, "y": y.values}, index=df_plot.index).reset_index().rename(columns={"index": "year"}),
+                year='all_years',
+            )
             plt.close(fig)
 
 def clean_gdp(gdp_df_full):

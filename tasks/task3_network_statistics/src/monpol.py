@@ -2,6 +2,7 @@ import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from common.utilities import save_graph_data
 
 def plot_irf_up_classes(irf_wide,
                         se_wide):
@@ -174,6 +175,13 @@ def plot_irfs(panel_h, output_path, fig_name, var):
     plot_irf_up_classes(
         irf_wide=irf_wide,
         se_wide=se_wide
+    )
+    save_graph_data(
+        output_path=output_path,
+        file_name=f"{os.path.splitext(fig_name)[0]}_data",
+        data=class_irf[["h", "up_class", "tot_eff_class", "se_tot_eff_class"]],
+        year="all_years",
+        subfolder="monpol",
     )
 
     out_dir = os.path.join(output_path, 'all_years','monpol')
@@ -555,6 +563,22 @@ def plot_percentile_contrib_by_horizon_delta(
     out_dir = os.path.join(output_path, 'all_years',"monpol")
     os.makedirs(out_dir, exist_ok=True)
     fig_path = os.path.join(out_dir, f"contrib_percentiles_{var}_{country}.png")
+    rows = []
+    for j, p in enumerate(tails):
+        rows.append(pd.DataFrame({
+            "h": horizons,
+            "percentile": p,
+            "mean_pct": mean_pct[:, j],
+            "ci_low_pct": lo_pct[:, j],
+            "ci_high_pct": hi_pct[:, j],
+        }))
+    save_graph_data(
+        output_path=output_path,
+        file_name=f"contrib_percentiles_{var}_{country}_data",
+        data=pd.concat(rows, ignore_index=True),
+        year="all_years",
+        subfolder="monpol",
+    )
     plt.savefig(fig_path, dpi=300, bbox_inches="tight")
     plt.close()
 
@@ -831,6 +855,13 @@ def plot_share_dots_by_class(
         import os
         os.makedirs(output_path, exist_ok=True)
         fig_path = os.path.join(output_path, filename)
+        save_graph_data(
+            output_path=os.path.dirname(os.path.dirname(output_path)),
+            file_name=f"{os.path.splitext(filename)[0]}_data",
+            data=plot_df.reset_index().rename(columns={"index": "h"}),
+            year="all_years",
+            subfolder="monpol",
+        )
         plt.savefig(fig_path, dpi=300, bbox_inches="tight")
         plt.close()
     else:
