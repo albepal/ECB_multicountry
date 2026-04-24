@@ -41,7 +41,7 @@ def clean_B2B_df(tmp_path, B2B_df):
     
         B2B_df = B2B_df[B2B_df['sales_ij'] != 0]
         
-        #B2B_df = filter_giant_component(B2B_df)
+        B2B_df = filter_giant_component(B2B_df)
     
         B2B_df.to_parquet(os.path.join(tmp_path, 'B2B_data_cleaned.parquet'), engine='pyarrow')
 
