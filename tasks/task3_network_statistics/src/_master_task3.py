@@ -16,7 +16,7 @@ from task3_network_statistics.src.distributions import master_distributions
 from task3_network_statistics.src.coefficients_of_variation import master_cv
 from task3_network_statistics.src.var_decomposition import master_var_decomp
 from task3_network_statistics.src.monpol import master_monpol
-from common.utilities import initialize_task, maintenance, copy_output_from_task, create_folders_for_years, extract_start_end_years
+from common.utilities import initialize_task, maintenance, copy_output_from_task, create_folders_for_years, extract_start_end_years, setup_logs
 from common.load_data import extract_config
 
 def master_task3():
@@ -72,6 +72,8 @@ def master_task3():
     maintenance(abs_path)
 
 if __name__ == '__main__':
+    project_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    setup_logs(__file__, project_path)
     master_task3()
 
 

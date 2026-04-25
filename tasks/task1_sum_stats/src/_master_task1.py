@@ -9,7 +9,7 @@
 import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..','..')))
-from common.utilities import initialize_task, maintenance, copy_output_from_task
+from common.utilities import initialize_task, maintenance, copy_output_from_task, setup_logs
 from common.load_data import load_data, extract_b2b_config, extract_config, extract_firm_data_config, extract_data_type
 from task1_sum_stats.src.sum_stat import master_sum_stat
 
@@ -46,4 +46,6 @@ def master_task1():
     maintenance(abs_path)
 
 if __name__ == '__main__':
+    project_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    setup_logs(__file__, project_path)
     master_task1()

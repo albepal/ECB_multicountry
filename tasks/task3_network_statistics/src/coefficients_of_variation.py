@@ -107,7 +107,9 @@ def create_micro_IO(full_df, output_path, start, end, country):
         df_year = full_df[full_df['year'] == year].copy()
         
         sales_j_4d = (
-            df_year.groupby('nace_j')['turnover_j']
+            df_year[['vat_j', 'nace_j', 'turnover_j']]
+            .drop_duplicates(subset=['vat_j'])
+            .groupby('nace_j')['turnover_j']
             .sum()
             .rename('sector_sales_j')
             .reset_index()
@@ -126,7 +128,9 @@ def create_micro_IO(full_df, output_path, start, end, country):
         io_4d_mat.to_csv(os.path.join(output_path, str(year),f'io_nace4d_mat_{country}.csv'))
         
         sales_j_2d = (
-            df_year.groupby('nace_j_2d')['turnover_j']
+            df_year[['vat_j', 'nace_j_2d', 'turnover_j']]
+            .drop_duplicates(subset=['vat_j'])
+            .groupby('nace_j_2d')['turnover_j']
             .sum()
             .rename('sector_sales_j')
             .reset_index()

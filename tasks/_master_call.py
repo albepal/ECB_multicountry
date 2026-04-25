@@ -14,6 +14,7 @@ from task0_random_data.src._master_task0 import master_task0
 from task1_sum_stats.src._master_task1 import master_task1
 from task2_clean_data.src._master_task2 import master_task2
 from task3_network_statistics.src._master_task3 import master_task3
+from common.utilities import setup_logs
 
 def master_call():
 
@@ -31,4 +32,6 @@ def master_call():
     master_task3()
 
 if __name__ == '__main__':
+    project_path = os.path.abspath(os.path.dirname(__file__))
+    setup_logs(__file__, project_path)
     master_call()
