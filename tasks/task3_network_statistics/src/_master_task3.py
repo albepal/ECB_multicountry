@@ -51,7 +51,7 @@ def master_task3():
 
     # 6. Analysis
     # 6a. Correlations
-    #master_ext_mgn_correlations(panel_df, gdp_df, output_path, start, end, country)
+    master_ext_mgn_correlations(panel_df, gdp_df, output_path, start, end, country)
     
     # 6b. CCDF
     master_CCDF(full_df, panel_df, output_path, start, end, country)
