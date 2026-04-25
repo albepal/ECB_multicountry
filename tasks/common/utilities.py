@@ -1,4 +1,6 @@
 import os
+import sys
+from pathlib import Path
 import pickle
 import pandas as pd
 import numpy as np
@@ -123,6 +125,38 @@ def create_folders_for_years(abs_path, output_path):
             
         if not os.path.exists( os.path.join(output_path, f'{year}', 'coefficients_of_variation') ):
             os.makedirs( os.path.join(output_path, f'{year}', 'coefficients_of_variation') )
+
+# Save logs
+      
+class Tee:
+    def __init__(self, terminal, logfile):
+        self.terminal = terminal
+        self.logfile = logfile
+
+    def write(self, data):
+        self.terminal.write(data)
+        self.logfile.write(data)
+        self.logfile.flush()
+
+    def flush(self):
+        self.terminal.flush()
+        self.logfile.flush()
+
+
+def setup_logs(script_file, base_dir):
+    base_dir = Path(base_dir)
+    log_dir = base_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    script_name = Path(script_file).resolve().stem
+
+    print_log = open(log_dir / f"{script_name}_print_log.txt", "w", encoding="utf-8")
+    error_log = open(log_dir / f"{script_name}_error_log.txt", "w", encoding="utf-8")
+
+    sys.stdout = Tee(sys.__stdout__, print_log)
+    sys.stderr = Tee(sys.__stderr__, error_log)
+
+    return print_log, error_log
 
 ################################
 # Functions for loading data
